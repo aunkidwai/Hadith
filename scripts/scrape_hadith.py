@@ -39,7 +39,10 @@ def fetch_page(url):
 
 
 def scrape_books(collection):
-    """Scrape the list of all books from the main collection page."""
+    """Scrape the list of all books from the main collection page.
+
+    Returns (books, soup) where soup is kept for flat collections.
+    """
     url = f"{BASE_URL}/{collection}"
     print(f"Fetching book list from {url}")
     html = fetch_page(url)
@@ -66,31 +69,22 @@ def scrape_books(collection):
         })
 
     print(f"Found {len(books)} books")
-    return books
+    return books, soup
 
 
-def scrape_hadith(book_url):
-    """Scrape all hadith from a single book page."""
-    html = fetch_page(book_url)
-    soup = BeautifulSoup(html, "lxml")
-
+def _parse_hadith_containers(containers):
+    """Extract hadith data from a list of actualHadithContainer divs."""
     hadith_list = []
-    containers = soup.find_all("div", class_="actualHadithContainer")
-
     for container in containers:
-        # Hadith number from anchor name attribute
         anchor = container.find("a", attrs={"name": True})
         hadith_num = anchor.get("name", "") if anchor else ""
 
-        # English text
         eng_div = container.find("div", class_="english_hadith_full")
         eng_text = eng_div.get_text(separator="\n", strip=True) if eng_div else ""
 
-        # Arabic text
         arb_div = container.find("div", class_="arabic_hadith_full")
         arb_text = arb_div.get_text(separator="\n", strip=True) if arb_div else ""
 
-        # Reference from the table
         ref_text = ""
         table = container.find("table")
         if table:
@@ -104,8 +98,56 @@ def scrape_hadith(book_url):
             "english": eng_text,
             "arabic": arb_text,
         })
-
     return hadith_list
+
+
+def scrape_hadith(book_url):
+    """Scrape all hadith from a single book page."""
+    html = fetch_page(book_url)
+    soup = BeautifulSoup(html, "lxml")
+    containers = soup.find_all("div", class_="actualHadithContainer")
+    return _parse_hadith_containers(containers)
+
+
+def scrape_flat_collection(soup):
+    """Scrape a single-page collection that has all hadith on the main page.
+
+    Groups hadith by chapter divs if present, otherwise returns one group.
+    """
+    all_hadith_div = soup.find("div", class_="AllHadith")
+    if not all_hadith_div:
+        return []
+
+    chapters = soup.find_all("div", class_="chapter")
+
+    if chapters:
+        # Collection has chapter sections (e.g. hisn) — group hadith by chapter
+        books_data = []
+        for chapter in chapters:
+            echapno = chapter.find("div", class_="echapno")
+            eng_ch = chapter.find("div", class_="englishchapter")
+            arb_ch = chapter.find("div", class_="arabicchapter")
+
+            ch_num = echapno.get_text(strip=True).strip("()") if echapno else ""
+            ch_en = eng_ch.get_text(strip=True).removeprefix("Chapter:").strip() if eng_ch else ""
+            ch_ar = arb_ch.get_text(strip=True) if arb_ch else ""
+
+            # Collect all hadith containers between this chapter and the next
+            containers = []
+            for sibling in chapter.find_next_siblings():
+                if "chapter" in (sibling.get("class") or []):
+                    break
+                if "actualHadithContainer" in (sibling.get("class") or []):
+                    containers.append(sibling)
+
+            book = {"number": ch_num, "title_en": ch_en, "title_ar": ch_ar}
+            books_data.append((book, _parse_hadith_containers(containers)))
+        return books_data
+    else:
+        # Truly flat — no chapters (e.g. nawawi40)
+        containers = soup.find_all("div", class_="actualHadithContainer")
+        book = {"number": "", "title_en": "", "title_ar": ""}
+        return [(book, _parse_hadith_containers(containers))]
 
 
 def create_excel(books_data, output_path):
@@ -219,21 +261,28 @@ def main():
     project_dir = os.path.dirname(script_dir)
     output_path = os.path.join(project_dir, "output", collection, f"{collection}_hadith.xlsx")
 
-    books = scrape_books(collection)
-    books_data = []
-    total_hadith = 0
+    books, soup = scrape_books(collection)
 
-    for i, book in enumerate(books):
-        print(f"[{i+1}/{len(books)}] Scraping Book {book['number']}: {book['title_en']}...", end=" ")
-        hadith_list = scrape_hadith(book["url"])
-        print(f"{len(hadith_list)} hadith")
-        books_data.append((book, hadith_list))
-        total_hadith += len(hadith_list)
+    if books:
+        # Multi-page collection — scrape each book page
+        books_data = []
+        total_hadith = 0
+        for i, book in enumerate(books):
+            print(f"[{i+1}/{len(books)}] Scraping Book {book['number']}: {book['title_en']}...", end=" ")
+            hadith_list = scrape_hadith(book["url"])
+            print(f"{len(hadith_list)} hadith")
+            books_data.append((book, hadith_list))
+            total_hadith += len(hadith_list)
+            if i < len(books) - 1:
+                time.sleep(REQUEST_DELAY)
+    else:
+        # Single-page / flat collection — all hadith on main page
+        print("No book sub-pages found, scraping hadith from main page...")
+        books_data = scrape_flat_collection(soup)
+        total_hadith = sum(len(h) for _, h in books_data)
 
-        if i < len(books) - 1:
-            time.sleep(REQUEST_DELAY)
-
-    print(f"\nTotal: {len(books)} books, {total_hadith} hadith")
+    sections = len(books_data)
+    print(f"\nTotal: {sections} section(s), {total_hadith} hadith")
     create_excel(books_data, output_path)
 
 
