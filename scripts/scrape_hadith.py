@@ -142,7 +142,8 @@ def create_excel(books_data, output_path):
         cell.border = thin_border
 
     for row, (book, hadith_list) in enumerate(books_data, 2):
-        ws_index.cell(row=row, column=1, value=int(book["number"])).alignment = center_alignment
+        book_num = int(book["number"]) if book["number"].isdigit() else book["number"]
+        ws_index.cell(row=row, column=1, value=book_num).alignment = center_alignment
         ws_index.cell(row=row, column=2, value=book["title_en"]).alignment = english_alignment
         cell_ar = ws_index.cell(row=row, column=3, value=book["title_ar"])
         cell_ar.font = arabic_font
@@ -172,7 +173,8 @@ def create_excel(books_data, output_path):
     current_row = 2
     for book, hadith_list in books_data:
         for h in hadith_list:
-            ws_all.cell(row=current_row, column=1, value=int(book["number"])).alignment = center_alignment
+            book_num = int(book["number"]) if book["number"].isdigit() else book["number"]
+            ws_all.cell(row=current_row, column=1, value=book_num).alignment = center_alignment
             ws_all.cell(row=current_row, column=2, value=book["title_en"]).alignment = english_alignment
             cell_bar = ws_all.cell(row=current_row, column=3, value=book["title_ar"])
             cell_bar.font = arabic_font
