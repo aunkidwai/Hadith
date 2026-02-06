@@ -1,9 +1,16 @@
 """
-Scraper for Muwatta Malik hadith collection from sunnah.com/malik.
-Extracts all books and their hadith, then exports to Excel.
+Generic scraper for hadith collections on sunnah.com.
+
+Usage:
+    python scrape_hadith.py <collection>
+
+Examples:
+    python scrape_hadith.py malik
+    python scrape_hadith.py bukhari
 """
 
-import re
+import os
+import sys
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -11,9 +18,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 BASE_URL = "https://sunnah.com"
-COLLECTION_URL = f"{BASE_URL}/malik"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
-REQUEST_DELAY = 1  # seconds between requests to be respectful
+REQUEST_DELAY = 1  # seconds between requests
 
 
 def fetch_page(url):
@@ -32,10 +38,11 @@ def fetch_page(url):
                 raise
 
 
-def scrape_books():
+def scrape_books(collection):
     """Scrape the list of all books from the main collection page."""
-    print("Fetching book list from", COLLECTION_URL)
-    html = fetch_page(COLLECTION_URL)
+    url = f"{BASE_URL}/{collection}"
+    print(f"Fetching book list from {url}")
+    html = fetch_page(url)
     soup = BeautifulSoup(html, "lxml")
 
     books = []
@@ -49,7 +56,7 @@ def scrape_books():
         arb_title = arb_el.get_text(strip=True) if arb_el else ""
 
         link = entry.find("a")
-        href = link.get("href", "") if link else f"/malik/{book_num}"
+        href = link.get("href", "") if link else f"/{collection}/{book_num}"
 
         books.append({
             "number": book_num,
@@ -101,7 +108,7 @@ def scrape_hadith(book_url):
     return hadith_list
 
 
-def create_excel(books_data, output_path="malik_hadith.xlsx"):
+def create_excel(books_data, output_path):
     """Create an Excel workbook with the scraped data."""
     wb = Workbook()
 
@@ -109,9 +116,6 @@ def create_excel(books_data, output_path="malik_hadith.xlsx"):
     header_font = Font(name="Arial", bold=True, size=12, color="FFFFFF")
     header_fill = PatternFill(start_color="2E6B4E", end_color="2E6B4E", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    book_header_font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
-    book_header_fill = PatternFill(start_color="4A90D9", end_color="4A90D9", fill_type="solid")
 
     arabic_font = Font(name="Arial", size=11)
     arabic_alignment = Alignment(horizontal="right", vertical="top", wrap_text=True)
@@ -197,12 +201,23 @@ def create_excel(books_data, output_path="malik_hadith.xlsx"):
     ws_index.freeze_panes = "A2"
     ws_all.freeze_panes = "A2"
 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     wb.save(output_path)
     print(f"\nExcel file saved to: {output_path}")
 
 
 def main():
-    books = scrape_books()
+    if len(sys.argv) < 2:
+        print("Usage: python scrape_hadith.py <collection>")
+        print("Example: python scrape_hadith.py malik")
+        sys.exit(1)
+
+    collection = sys.argv[1].lower()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(script_dir)
+    output_path = os.path.join(project_dir, "output", collection, f"{collection}_hadith.xlsx")
+
+    books = scrape_books(collection)
     books_data = []
     total_hadith = 0
 
@@ -217,7 +232,7 @@ def main():
             time.sleep(REQUEST_DELAY)
 
     print(f"\nTotal: {len(books)} books, {total_hadith} hadith")
-    create_excel(books_data, "malik_hadith.xlsx")
+    create_excel(books_data, output_path)
 
 
 if __name__ == "__main__":
